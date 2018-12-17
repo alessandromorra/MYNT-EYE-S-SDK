@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <functional>
 
 #include <opencv2/core/core.hpp>
 

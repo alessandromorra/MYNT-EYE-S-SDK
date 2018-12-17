@@ -21,6 +21,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <tf/tf.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
 #include <opencv2/calib3d/calib3d.hpp>
@@ -33,10 +34,10 @@
 #include <map>
 #include <string>
 
-#include "mynteye/logger.h"
 #include "mynteye/api/api.h"
 #include "mynteye/device/context.h"
 #include "mynteye/device/device.h"
+#include "mynteye/logger.h"
 
 #define FULL_PRECISION \
   std::fixed << std::setprecision(std::numeric_limits<double>::max_digits10)
@@ -181,9 +182,9 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     for (auto &&it = stream_names.begin(); it != stream_names.end(); ++it) {
       auto &&topic = stream_topics[it->first];
       if (it->first == Stream::POINTS) {  // pointcloud
-        points_publisher_ = nh_.advertise<sensor_msgs::PointCloud2>(topic, 1);
+        points_publisher_ = nh_.advertise<sensor_msgs::PointCloud2>(topic, 100);
       } else {  // camera
-        camera_publishers_[it->first] = it_mynteye.advertiseCamera(topic, 1);
+        camera_publishers_[it->first] = it_mynteye.advertiseCamera(topic, 100);
       }
       NODELET_INFO_STREAM("Advertized on topic " << topic);
     }
@@ -196,10 +197,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
                          {Stream::DISPARITY_NORMALIZED, enc::MONO8},
                          {Stream::DEPTH, enc::MONO16}};
 
-    pub_imu_ = nh_.advertise<sensor_msgs::Imu>(imu_topic, 1);
+    pub_imu_ = nh_.advertise<sensor_msgs::Imu>(imu_topic, 100);
     NODELET_INFO_STREAM("Advertized on topic " << imu_topic);
 
-    pub_temp_ = nh_.advertise<mynt_eye_ros_wrapper::Temp>(temp_topic, 1);
+    pub_temp_ = nh_.advertise<mynt_eye_ros_wrapper::Temp>(temp_topic, 100);
     NODELET_INFO_STREAM("Advertized on topic " << temp_topic);
 
     // stream toggles
@@ -620,7 +621,14 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     for (size_t i = 0; i < n; i++) {
       auto &&device = devices[i];
       auto &&name = device->GetInfo(Info::DEVICE_NAME);
-      NODELET_INFO_STREAM("  index: " << i << ", name: " << name);
+      auto &&serial = device->GetInfo(Info::SERIAL_NUMBER);
+      auto &&firmware = device->GetInfo(Info::FIRMWARE_VERSION);
+      auto &&hardware = device->GetInfo(Info::HARDWARE_VERSION);
+
+      NODELET_INFO_STREAM(
+          "  index: " << i << ", name: " << name << " serial: " << serial
+                      << " firmware version: " << firmware
+                      << " hardware: " << hardware);
     }
 
     std::shared_ptr<Device> device = nullptr;
@@ -760,6 +768,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     b2l_msg.transform.rotation.y = 0;
     b2l_msg.transform.rotation.z = 0;
     b2l_msg.transform.rotation.w = 1;
+
     static_tf_broadcaster_.sendTransform(b2l_msg);
 
     // Transform left frame to right frame
@@ -782,6 +791,9 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     l2r_msg.transform.rotation.z = l2r_q.getZ();
     l2r_msg.transform.rotation.w = l2r_q.getW();
     static_tf_broadcaster_.sendTransform(l2r_msg);
+
+    tf2::Stamped<tf2::Transform> T_C1_C0;
+    tf2::fromMsg(l2r_msg, T_C1_C0);
 
     // Transform left frame to left_rect frame
     geometry_msgs::TransformStamped l2rect_msg;
@@ -894,6 +906,33 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       l2i_msg.transform.rotation.w = l2i_q.getW();
     }
     static_tf_broadcaster_.sendTransform(l2i_msg);
+
+    tf2::Stamped<tf2::Transform> T_I_C0;
+    tf2::fromMsg(l2i_msg, T_I_C0);
+
+    tf2::Transform T_I_C1 = T_I_C0 * T_C1_C0.inverse();
+
+    tf2::Matrix3x3 R_I_C0 = tf2::Matrix3x3(T_I_C0.getRotation());
+    tf2::Vector3 p_I_C0 = T_I_C0.getOrigin();
+    NODELET_INFO_STREAM(
+        "T_I_C0 Rotation: "
+        << R_I_C0[0][0] << "," << R_I_C0[0][1] << "," << R_I_C0[0][2] << ";"
+        << R_I_C0[1][0] << "," << R_I_C0[1][1] << "," << R_I_C0[1][2] << ";"
+        << R_I_C0[2][0] << "," << R_I_C0[2][1] << "," << R_I_C0[2][2]);
+    NODELET_INFO_STREAM(
+        "T_I_C0 Translation: " << p_I_C0[0] << "," << p_I_C0[1] << ","
+                               << p_I_C0[2]);
+
+    tf2::Matrix3x3 R_I_C1 = tf2::Matrix3x3(T_I_C1.getRotation());
+    tf2::Vector3 p_I_C1 = T_I_C1.getOrigin();
+    NODELET_INFO_STREAM(
+        "T_I_C1 Rotation: "
+        << R_I_C1[0][0] << "," << R_I_C1[0][1] << "," << R_I_C1[0][2] << ";"
+        << R_I_C1[1][0] << "," << R_I_C1[1][1] << "," << R_I_C1[1][2] << ";"
+        << R_I_C1[2][0] << "," << R_I_C1[2][1] << "," << R_I_C1[2][2]);
+    NODELET_INFO_STREAM(
+        "T_I_C1 Translation: " << p_I_C1[0] << "," << p_I_C1[1] << ","
+                               << p_I_C1[2]);
   }
 
   ros::NodeHandle nh_;
