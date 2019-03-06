@@ -22,7 +22,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/Utils.cmake)
 
 option(WITH_API "Build with API layer, need OpenCV" ON)
 
-option(WITH_DEVICE_INFO_REQUIRED "Build with device info required" ON)
+option(WITH_DEVICE_INFO_REQUIRED "Build with device info required" OFF)
 
 # 3rdparty components
 
